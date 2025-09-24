@@ -73,6 +73,8 @@ pip install -r requirements.txt
             └── intersections.duckdb
 
 
+
+
 ## 3) Onde baixar os dados (fontes)
 
 Os links podem mudar; se mudar, pesquise pelos nomes indicados.
