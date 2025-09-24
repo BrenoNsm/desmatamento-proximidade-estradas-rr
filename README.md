@@ -36,7 +36,7 @@ pip install -r requirements.txt
 
 ## 2) Estrutura de pastas esperada
 
-'''
+```
 .
 ├── app.py
 ├── doc.py
@@ -73,7 +73,7 @@ pip install -r requirements.txt
 ├── by_ring_year.csv
 ├── by_ring_total.csv
 └── intersections.duckdb
-'''
+```
 
 
 ## 3) Onde baixar os dados (fontes)
