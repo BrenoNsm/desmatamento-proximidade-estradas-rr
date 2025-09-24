@@ -41,37 +41,36 @@ pip install -r requirements.txt
 ├── gen_figures.py
 ├── requirements.txt
 ├── scripts/
-│   ├── 01_prepare_osm_rr.py
-│   ├── 02_prepare_prodes_rr.py
-│   ├── 03_create_buffers.py
-│   ├── 04_intersection.py                  # (opção A)
-│   ├── 05_precompute_intersections.py      # (opção B – recomendada)
-│   ├── 06_build_duckdb.py                  # (opção B – recomendada)
-│   └── check_data.py                       # (opcional; ver abaixo)
+│ ├── 01_prepare_osm_rr.py
+│ ├── 02_prepare_prodes_rr.py
+│ ├── 03_create_buffers.py
+│ ├── 04_intersection.py # (opção A)
+│ ├── 05_precompute_intersections.py # (opção B – recomendada)
+│ ├── 06_build_duckdb.py # (opção B – recomendada)
+│ └── check_data.py # (opcional; ver abaixo)
 └── data/
-    ├── external/
-    │   ├── ibge_uf/                        # shapefile da UF (RR)
-    │   │   └── RR_UF_2024.(shp|shx|dbf|prj|...)
-    │   └── ibge_municipal/                 # shapefile de municípios de RR
-    │       └── RR_Municipios_2024.(shp|shx|dbf|prj|...)
-    ├── osm/
-    │   └── gis_osm_roads_free_1.(shp|shx|dbf|prj|cpg)
-    ├── prodes/
-    │   └── yearly_deforestation_biome.(shp|shx|dbf|prj|...)
-    └── processed/
-        ├── roraima_aoi.geojson
-        ├── roads_rr.(shp|shx|dbf|prj)
-        ├── buffers/
-        │   ├── roads_buffer_5km.(shp|shx|dbf|prj)
-        │   ├── roads_buffer_10km.(shp|shx|dbf|prj)
-        │   ├── roads_buffer_20km.(shp|shx|dbf|prj)
-        │   └── buffer_rings.(shp|shx|dbf|prj)
-        └── intersection/
-            ├── inter_prodes_rings.parquet
-            ├── by_ring_year.csv
-            ├── by_ring_total.csv
-            └── intersections.duckdb
-
+├── external/
+│ ├── ibge_uf/
+│ │ └── RR_UF_2024.(shp|shx|dbf|prj|…)
+│ └── ibge_municipal/
+│ └── RR_Municipios_2024.(shp|shx|dbf|prj|…)
+├── osm/
+│ └── gis_osm_roads_free_1.(shp|shx|dbf|prj|cpg)
+├── prodes/
+│ └── yearly_deforestation_biome.(shp|shx|dbf|prj|…)
+└── processed/
+├── roraima_aoi.geojson
+├── roads_rr.(shp|shx|dbf|prj)
+├── buffers/
+│ ├── roads_buffer_5km.(shp|shx|dbf|prj)
+│ ├── roads_buffer_10km.(shp|shx|dbf|prj)
+│ ├── roads_buffer_20km.(shp|shx|dbf|prj)
+│ └── buffer_rings.(shp|shx|dbf|prj)
+└── intersection/
+├── inter_prodes_rings.parquet
+├── by_ring_year.csv
+├── by_ring_total.csv
+└── intersections.duckdb
 
 
 
