@@ -1,0 +1,11 @@
+streamlit
+streamlit-folium
+geopandas
+pandas
+shapely
+folium
+matplotlib
+pyogrio
+duckdb
+reportlab
+pyarrow
