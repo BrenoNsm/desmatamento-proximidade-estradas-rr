@@ -29,4 +29,4 @@ def fit_model(data, resolution):
     return {"coefficients":rows,"n":len(sample),"excluded":len(d)-len(sample),"blocks":nblocks,
         "years":sorted(map(int,sample.year.unique())),"deviance":float(fit.deviance),
         "excluded_area_ha":float(d.loc[~good,"area_ha"].sum()),
-        "note":"PPML com efeitos fixos anuais, offset log da cobertura florestal MapBiomas t-1, erros agrupados em blocos de 50 km. Associação exploratória; não regressão espacial estrutural nem inferência causal."}
+        "note":"PPML com efeitos fixos anuais, offset log da proxy de disponibilidade florestal t-1, erros agrupados em blocos de 50 km. Associação exploratória; não regressão espacial estrutural nem inferência causal."}
