@@ -1,0 +1,10 @@
+geopandas>=1.0,<2
+shapely>=2.0,<3
+pyproj>=3.6,<4
+pandas>=2.2,<3
+duckdb>=1.1,<2
+pyarrow>=16
+pyogrio>=0.9
+streamlit>=1.40,<2
+pydeck>=0.9,<1
+pytest>=8,<10
