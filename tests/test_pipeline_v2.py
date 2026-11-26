@@ -17,3 +17,20 @@ def test_municipal_split():
     result = gpd.overlay(p,m,how="intersection")
     assert hectares(result).sum() == pytest.approx(hectares(p).sum(), rel=1e-5)
     assert len(result) == 2
+
+
+def test_clip_removes_boundary_contacts_and_preserves_polygon_parts():
+    from shapely.geometry import GeometryCollection, Point
+    from pipeline_v2 import polygons
+    aoi = gpd.GeoDataFrame(geometry=[box(0,0,1000,1000)], crs=DIST)
+    source = gpd.GeoDataFrame({"year":[2020,2021,2022]}, geometry=[
+        box(100,100,300,300), box(1000,100,1200,300),
+        box(1000,1000,1200,1200)], crs=DIST)
+    cleaned = polygons(gpd.clip(source,aoi))
+    assert cleaned.geom_type.isin(["Polygon","MultiPolygon"]).all()
+    assert set(cleaned.year) == {2020}
+    mixed = gpd.GeoDataFrame({"year":[2023]}, geometry=[
+        GeometryCollection([box(0,0,100,100),LineString([(0,0),(0,200)]),Point(300,300)])], crs=DIST)
+    result = polygons(mixed)
+    assert len(result) == 1
+    assert result.geometry.area.sum() == pytest.approx(10000)
