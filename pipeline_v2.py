@@ -32,11 +32,22 @@ def acquire(spec, name):
             raise FileNotFoundError(path)
         files = sorted(path.parent.glob(path.stem + ".*")) if path.suffix == ".shp" else [path]
         return path, {"path": str(path), "sha256": {p.name: digest(p) for p in files}}
+    if spec.get("wfs"):
+        from download_prodes_v2 import acquire_prodes
+        return acquire_prodes(spec, ROOT / "data" / "downloads_v2" / name)
     url = spec["url"]
     if not url.startswith("https://"):
         raise ValueError("Use HTTPS para fontes remotas")
     cache = ROOT / "data" / "downloads_v2" / name
     cache.mkdir(parents=True, exist_ok=True)
+    receipt = cache / "receipt.json"
+    if receipt.exists():
+        saved = json.loads(receipt.read_text(encoding="utf-8"))
+        path = cache / saved["sha256"] / saved["member"]
+        if saved["url"] == url and path.is_file() and (not spec.get("sha256") or spec["sha256"] == saved["sha256"]):
+            print(f"[CACHE] {name}", flush=True)
+            return path, saved
+    print(f"[DOWNLOAD] {name}: {url}", flush=True)
     with tempfile.TemporaryDirectory(dir=cache) as tmp:
         archive = Path(tmp) / "source.zip"
         with urllib.request.urlopen(url, timeout=120) as response, archive.open("wb") as f:
@@ -55,10 +66,15 @@ def acquire(spec, name):
                         raise ValueError("Arquivo ZIP inseguro")
                 z.extractall(staging)
             staging.rename(target)
-    path = target / spec["member"]
+    matches = list(target.rglob(spec["member"]))
+    if len(matches) != 1:
+        raise ValueError(f"Arquivo esperado no ZIP: {spec['member']}; encontrados: {matches}")
+    path = matches[0]
     if not path.resolve().is_relative_to(target.resolve()) or not path.is_file():
         raise ValueError(f"Arquivo ausente no ZIP: {name}")
-    return path, {"url": url, "sha256": sha, "member": spec["member"]}
+    saved = {"url": url, "sha256": sha, "member": str(path.relative_to(target))}
+    receipt.write_text(json.dumps(saved), encoding="utf-8")
+    return path, saved
 
 def read(path):
     df = gpd.read_file(path)
@@ -151,6 +167,6 @@ def run(config):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="research_v2.json")
+    parser.add_argument("--config", default="research_v2.auto.json")
     args = parser.parse_args()
     run(json.loads(Path(args.config).read_text(encoding="utf-8")))
