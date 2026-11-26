@@ -1,0 +1,5 @@
+data/
+.venv/
+__pycache__/
+.pytest_cache/
+research_v2.json
