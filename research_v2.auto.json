@@ -1,0 +1,16 @@
+{
+  "municipalities": {
+    "url": "https://geoftp.ibge.gov.br/organizacao_do_territorio/malhas_territoriais/malhas_municipais/municipio_2024/UFs/RR/RR_Municipios_2024.zip",
+    "member": "RR_Municipios_2024.shp"
+  },
+  "roads": {
+    "url": "https://download.geofabrik.de/south-america/brazil/norte-latest-free.shp.zip",
+    "member": "gis_osm_roads_free_1.shp"
+  },
+  "prodes": {
+    "wfs": "https://terrabrasilis.dpi.inpe.br/geoserver/prodes-amazon-nb/ows",
+    "layer": "prodes-amazon-nb:yearly_deforestation_biome"
+  },
+  "road_classes": null,
+  "road_coverage_note": "Extrato norte do Brasil; não inclui cobertura internacional."
+}
