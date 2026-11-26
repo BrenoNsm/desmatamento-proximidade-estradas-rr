@@ -20,10 +20,10 @@ ROOT=Path(__file__).resolve().parent
 ENDPOINT="https://terrabrasilis.dpi.inpe.br/geoserver/prodes-amazon-nb/ows"
 # Only explicitly named baseline classes; never substitute annual or current cumulative data.
 ALIASES={
- "baseline": {"accumulated_deforestation_biome","accumulated_deforestation","deforestation_2007_biome","deforestation_2007","accumulated_deforestation_2007"},
- "nonforest":{"non_forest_biome","non_forest","nonforest_biome","nonforest"},
+ "baseline": {"accumulated_deforestation_2007_biome","deforestation_2007_biome","deforestation_2007","accumulated_deforestation_2007"},
+ "nonforest":{"no_forest_biome","non_forest_biome","non_forest","nonforest_biome","nonforest"},
  "water":{"hydrography_biome","hydrography","hydro_biome","hydro"},
- "biome":{"amazon_biome","amazon_biome_boundary","biome_boundary","biome_amazon","amazon_biome_limit","limit_amazon_biome"}
+ "biome":{"amazon_biome_border","amazon_biome","amazon_biome_boundary","biome_boundary","biome_amazon","amazon_biome_limit","limit_amazon_biome"}
 }
 
 def catalogue():
@@ -69,7 +69,9 @@ def reconstruct(grid, domain, masks, increments, years):
     covered=union_by_cell(grid,masks)
     # Include all increments since 2008, not just the user-selected years.
     result=[]
-    for row in grid.itertuples():
+    for pos,row in enumerate(grid.itertuples(),1):
+        if pos==1 or pos%500==0 or pos==len(grid):
+            print(f"[INPE] Reconstrução {pos}/{len(grid)} células",flush=True)
         cell=row.geometry
         eligible=cell.intersection(domain)
         initial=eligible.difference(covered.get(row.cell_id,cell.difference(cell)))
@@ -109,6 +111,7 @@ def main():
     if not years or min(years)<2008:raise ValueError("Período deve começar em 2008 ou depois")
     inputs={};provenance={}
     for role,name in selected.items():
+        print(f"[INPE] Adquirindo {role}: {name}",flush=True)
         path,receipt=acquire_prodes({"wfs":ENDPOINT,"layer":name},ROOT/"data/downloads_v3/inpe"/role)
         inputs[role]=polygons(gpd.read_file(path).to_crs(AREA))
         provenance[role]=receipt
@@ -121,7 +124,11 @@ def main():
     elif classcol is not None:
         if set(baseline[classcol].astype(str).str.lower().unique())!={"d2007"}:
             raise ValueError("Classe de máscara incompatível com d2007")
+    elif selected["baseline"] == "prodes-amazon-nb:accumulated_deforestation_2007_biome" and "2007" in layers[selected["baseline"]]:
+        print("[INPE] Baseline 2007 identificado pelo nome e título oficiais da camada (sem atributo temporal)",flush=True)
     else:raise ValueError("Não foi possível comprovar data da máscara acumulada")
+    provenance["baseline"]["catalogue_title"]=layers[selected["baseline"]]
+    provenance["baseline"]["date_evidence"]="year attribute" if yearcol is not None else ("class_name attribute" if classcol is not None else "official layer name and title")
     if args.check_only:
         print("[OK] Camadas adquiridas e máscara de 2007 verificada");return
     increments=polygons(gpd.read_parquet(ROOT/"data/v2/fragments.parquet").to_crs(AREA))[["year","geometry"]]
