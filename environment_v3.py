@@ -2,6 +2,8 @@
 import argparse
 import hashlib
 import json
+import urllib.request
+import urllib.error
 from pathlib import Path
 from datetime import datetime, timezone
 import numpy as np
@@ -21,6 +23,23 @@ URL="https://storage.googleapis.com/mapbiomas-public/initiatives/brasil/collecti
 FOREST=[3,6,5,49]
 OPEN_NATIVE=[4,7,11,12,77,84,50,32]
 PIXEL=30
+
+def remote_raster(url):
+    """Check the actual object with a bounded GET, not a directory listing or HEAD."""
+    req=urllib.request.Request(url,headers={"Range":"bytes=0-15","User-Agent":"GeoForestLab/3.0"})
+    try:
+        with urllib.request.urlopen(req,timeout=60) as response:
+            status=response.status
+            signature=response.read(4)
+            if status!=206:
+                raise RuntimeError(f"Servidor não oferece leitura parcial HTTP (status {status}): {url}")
+            if signature not in (b"II*\x00",b"MM\x00*",b"II+\x00",b"MM\x00+"):
+                raise RuntimeError(f"Resposta não é TIFF: {url}")
+            print(f"[HTTP] GET Range {status}; TIFF confirmado",flush=True)
+    except urllib.error.HTTPError as e:
+        detail=e.read(500).decode("utf-8",errors="replace")
+        raise RuntimeError(f"MapBiomas retornou HTTP {e.code} no GET direto do arquivo oficial: {url}\n{detail}") from e
+    return "/vsicurl?use_head=no&list_dir=no&empty_dir=yes&url="+url
 
 def aggregate(grid, source):
     grid=grid.to_crs(AREA).reset_index(drop=True)
@@ -74,8 +93,11 @@ def main():
             print(f"[CACHE] MapBiomas {base}",flush=True);continue
         url=URL.format(year=base)
         print(f"[MAPBIOMAS] {base} → PRODES {year}",flush=True)
-        with rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR",GDAL_HTTP_MAX_RETRY="3",GDAL_HTTP_RETRY_DELAY="2"):
-            result=aggregate(grid,url)
+        source=remote_raster(url)
+        with rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR",CPL_VSIL_CURL_USE_HEAD="NO",
+                          CPL_VSIL_CURL_ALLOWED_EXTENSIONS=".tif",GDAL_HTTP_MAX_RETRY="3",
+                          GDAL_HTTP_RETRY_DELAY="2",GDAL_HTTP_USERAGENT="GeoForestLab/3.0"):
+            result=aggregate(grid,source)
         if result.valid_ha.sum()<=0: raise ValueError(f"Raster sem dados válidos: {base}")
         result["year"]=year
         result["cover_year"]=base
