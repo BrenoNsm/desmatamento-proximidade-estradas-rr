@@ -85,12 +85,16 @@ def environmental_sample(resolution,start,end):
     folder=ROOT/"data/v3"/str(resolution)
     path=folder/"environment.parquet"
     if not path.exists():
-        raise HTTPException(404,f"Execute python -u environment_v3.py --cell-km {resolution}")
+        raise HTTPException(404,f"Execute python -u environment_inpe_v3.py --cell-km {resolution}")
     with (folder/"grid.parquet").open("rb") as f:
         digest=hashlib.file_digest(f,"sha256").hexdigest()
     manifest=json.loads((folder/"environment_manifest.json").read_text())
     if manifest["grid_sha256"]!=digest:
         raise HTTPException(409,"Grade alterada; reprocesse a cobertura")
+    if "increment_sha256" in manifest:
+        with (ROOT/"data/v2/fragments.parquet").open("rb") as f:
+            if hashlib.file_digest(f,"sha256").hexdigest()!=manifest["increment_sha256"]:
+                raise HTTPException(409,"Incrementos alterados; reprocesse a cobertura")
     e=pd.read_parquet(path)
     d=a.merge(g.drop(columns=["geometry","area_ha","intensity"]),on="cell_id").merge(e,on=["cell_id","year"],how="left",validate="one_to_one")
     if d.cover_year.isna().any():
@@ -110,7 +114,8 @@ def environment(resolution:int=5,start:int=2008,end:int=2024):
     bands["ratio_pct"]=100*bands.area_ha/bands.forest_ha
     return {"annual":json.loads(annual.to_json(orient="records")),"bands":json.loads(bands.to_json(orient="records")),
             "n":int(good.sum()),"excluded":int((~good).sum()),"excluded_area_ha":float(d.loc[~good,"area_ha"].sum()),
-            "note":"Razão de incremento PRODES por cobertura florestal MapBiomas do ano anterior; não é perda florestal exata, pois produtos e períodos diferem. Faixas agregadas por hectare-ano."}
+            "provider":str(d.provider.iloc[0]) if "provider" in d else "MapBiomas",
+            "note":"Razão de incremento PRODES por proxy de disponibilidade florestal anterior. Consulte o manifesto ambiental para identificar a fonte e as limitações. Faixas agregadas por hectare-ano."}
 
 @app.get("/api/model")
 def model(resolution:int=5,start:int=2008,end:int=2024):
