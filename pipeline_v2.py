@@ -85,8 +85,11 @@ def read(path):
     return df
 
 def polygons(df):
-    df = df.explode(index_parts=False, ignore_index=True)
-    return df[df.geom_type.isin(["Polygon", "MultiPolygon"]) & ~df.geometry.is_empty].copy()
+    df = df[df.geometry.notna() & ~df.geometry.is_empty].copy()
+    df.geometry = make_valid(df.geometry.array)
+    while df.geom_type.eq("GeometryCollection").any():
+        df = df.explode(index_parts=False, ignore_index=True)
+    return df[df.geom_type.isin(["Polygon", "MultiPolygon"]) & ~df.geometry.is_empty].copy().reset_index(drop=True)
 
 def hectares(df):
     return df.to_crs(AREA).geometry.area / 10000
@@ -125,9 +128,11 @@ def run(config):
     roads = roads.explode(index_parts=False, ignore_index=True)
     roads = roads[roads.geom_type.isin(["LineString","MultiLineString"])]
     halo = aoi.buffer(max(RANGES)*1000)
-    roads = gpd.clip(roads, halo)
+    roads = gpd.clip(roads, halo, keep_geom_type=True)
+    roads = roads[roads.geom_type.isin(["LineString", "MultiLineString"]) & ~roads.geometry.is_empty].copy()
     if roads.empty:
         raise ValueError("Nenhuma estrada na área de processamento")
+    print("[PROCESSAMENTO] Gerando faixas de distância", flush=True)
     rings = rings_from_roads(roads, aoi)
     prodes = polygons(read(inputs["prodes"]).to_crs(DIST))
     year = next((c for c in prodes if c.lower() in ("year","ano")), None)
@@ -135,9 +140,12 @@ def run(config):
         raise ValueError("Coluna de ano ausente")
     prodes = prodes.rename(columns={year:"year"})[["year","geometry"]]
     prodes["year"] = pd.to_numeric(prodes.year, errors="raise").astype(int)
-    prodes = gpd.clip(prodes, aoi)
-    fragments = gpd.overlay(prodes, rings, how="intersection", keep_geom_type=True)
-    fragments = gpd.overlay(fragments, muni, how="intersection", keep_geom_type=True)
+    print("[PROCESSAMENTO] Recortando PRODES pelo limite estadual", flush=True)
+    prodes = polygons(gpd.clip(prodes, aoi))
+    print(f"[PROCESSAMENTO] Interseção de {len(prodes)} polígonos com faixas", flush=True)
+    fragments = polygons(gpd.overlay(prodes, rings, how="intersection", keep_geom_type=True))
+    print("[PROCESSAMENTO] Interseção municipal", flush=True)
+    fragments = polygons(gpd.overlay(fragments, muni, how="intersection", keep_geom_type=True))
     fragments["area_ha"] = hectares(fragments)
     fragments = fragments[fragments.area_ha > 0].copy()
     zones = gpd.overlay(rings, muni, how="intersection", keep_geom_type=True)
