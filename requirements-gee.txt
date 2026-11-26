@@ -1,0 +1,2 @@
+-r requirements-v3-environment.txt
+earthengine-api>=1.5,<2
