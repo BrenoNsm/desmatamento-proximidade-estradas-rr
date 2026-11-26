@@ -1,0 +1,6 @@
+-r requirements-v2.txt
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+numpy>=1.26,<3
+scipy>=1.12,<2
+statsmodels>=0.14,<1
