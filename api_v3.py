@@ -78,3 +78,49 @@ def export(resolution:int=5,start:int=2008,end:int=2024):
     data=a.merge(g.drop(columns=["geometry","area_ha","intensity"]),on="cell_id")
     data["intensity"]=100*data.area_ha/data.territory_ha
     return Response(data.to_csv(index=False),media_type="text/csv",headers={"Content-Disposition":"attachment; filename=research.csv"})
+
+def environmental_sample(resolution,start,end):
+    import hashlib
+    g,a,m=filtered(resolution,start,end)
+    folder=ROOT/"data/v3"/str(resolution)
+    path=folder/"environment.parquet"
+    if not path.exists():
+        raise HTTPException(404,f"Execute python -u environment_v3.py --cell-km {resolution}")
+    with (folder/"grid.parquet").open("rb") as f:
+        digest=hashlib.file_digest(f,"sha256").hexdigest()
+    manifest=json.loads((folder/"environment_manifest.json").read_text())
+    if manifest["grid_sha256"]!=digest:
+        raise HTTPException(409,"Grade alterada; reprocesse a cobertura")
+    e=pd.read_parquet(path)
+    d=a.merge(g.drop(columns=["geometry","area_ha","intensity"]),on="cell_id").merge(e,on=["cell_id","year"],how="left",validate="one_to_one")
+    if d.cover_year.isna().any():
+        missing=sorted(map(int,d.loc[d.cover_year.isna(),"year"].unique()))
+        raise HTTPException(422,f"Cobertura ausente para anos PRODES: {missing}")
+    return d
+
+@app.get("/api/environment")
+def environment(resolution:int=5,start:int=2008,end:int=2024):
+    d=environmental_sample(resolution,start,end)
+    good=(d.coverage_fraction>=.95)&(d.forest_ha>=1)
+    v=d[good].copy()
+    v["band"]=pd.cut(v.distance_km,[-np.inf,1,2,5,10,20,50,np.inf],labels=["0–1","1–2","2–5","5–10","10–20","20–50",">50"])
+    annual=v.groupby("year").agg(area_ha=("area_ha","sum"),forest_ha=("forest_ha","sum")).reset_index()
+    annual["ratio_pct"]=100*annual.area_ha/annual.forest_ha
+    bands=v.groupby("band",observed=True).agg(area_ha=("area_ha","sum"),forest_ha=("forest_ha","sum")).reset_index()
+    bands["ratio_pct"]=100*bands.area_ha/bands.forest_ha
+    return {"annual":json.loads(annual.to_json(orient="records")),"bands":json.loads(bands.to_json(orient="records")),
+            "n":int(good.sum()),"excluded":int((~good).sum()),"excluded_area_ha":float(d.loc[~good,"area_ha"].sum()),
+            "note":"Razão de incremento PRODES por cobertura florestal MapBiomas do ano anterior; não é perda florestal exata, pois produtos e períodos diferem. Faixas agregadas por hectare-ano."}
+
+@app.get("/api/model")
+def model(resolution:int=5,start:int=2008,end:int=2024):
+    from model_v3 import fit_model
+    try:
+        return fit_model(environmental_sample(resolution,start,end),resolution)
+    except (ValueError, ArithmeticError) as e:
+        raise HTTPException(422,str(e)) from e
+
+@app.get("/api/environment/export")
+def environmental_export(resolution:int=5,start:int=2008,end:int=2024):
+    d=environmental_sample(resolution,start,end)
+    return Response(d.to_csv(index=False),media_type="text/csv",headers={"Content-Disposition":"attachment; filename=environment.csv"})
