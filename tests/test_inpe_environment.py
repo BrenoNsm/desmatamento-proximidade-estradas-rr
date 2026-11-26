@@ -15,3 +15,9 @@ def test_reconstruct_overlaps_and_prior_years():
 def test_catalogue_requires_all_roles():
     with pytest.raises(ValueError):
         resolve({"x:yearly_deforestation_biome":"annual"}, {})
+
+
+def test_resolve_actual_inpe_catalogue():
+    names={"baseline":"accumulated_deforestation_2007_biome","nonforest":"no_forest_biome","water":"hydrography_biome","biome":"amazon_biome_border"}
+    catalogue={"prodes-amazon-nb:"+name:"" for name in names.values()}
+    assert resolve(catalogue,{})=={role:"prodes-amazon-nb:"+name for role,name in names.items()}
