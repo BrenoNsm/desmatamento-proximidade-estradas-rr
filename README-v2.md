@@ -1,5 +1,26 @@
 # V2 experimental — pesquisa geoespacial
 
+## Início rápido — Debian/Linux, sem dados locais
+
+Python 3.11+ recomendado.
+
+```bash
+git clone --branch develop/v2 --single-branch https://github.com/BrenoNsm/desmatamento-proximidade-estradas-rr.git desmatamento-v2
+cd desmatamento-v2
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-v2.txt
+python -m pytest -q
+python -u pipeline_v2.py
+python -m streamlit run app_v2.py
+```
+
+Para quem já clonou: `git pull origin develop/v2`.
+
+O pipeline usa research_v2.auto.json por padrão: baixa a malha IBGE 2024 e o extrato OSM Norte, consulta o PRODES Amazônia pelo WFS do INPE e conserva os downloads em data/downloads_v2. Não é necessário baixar ou copiar arquivos manualmente. Os serviços externos e a execução integral ainda precisam ser validados em ambiente real; se uma fonte falhar, o processamento interrompe em vez de produzir resultados parciais. O ZIP OSM regional pode ser grande. O cache conserva a primeira aquisição; remover o cache da fonte força nova aquisição. A cobertura viária internacional não está incluída.
+
+## Alternativa — bases locais
+
 A versão original permanece em main. A V2 é independente e usa data/v2. Python 3.11 ou 3.12 recomendado.
 
 ## Windows PowerShell
