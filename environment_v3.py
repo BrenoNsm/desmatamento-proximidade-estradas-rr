@@ -19,7 +19,7 @@ from shapely.geometry import box
 from pipeline_v2 import AREA
 
 ROOT=Path(__file__).resolve().parent
-URL="https://storage.googleapis.com/mapbiomas-public/initiatives/brasil/collection11/lulc/coverage/brazil_coverage/brazil_coverage-col11_{year}.tif"
+URLS={11:"https://storage.googleapis.com/mapbiomas-public/initiatives/brasil/collection11/lulc/coverage/brazil_coverage/brazil_coverage-col11_{year}.tif",10:"https://storage.googleapis.com/mapbiomas-public/initiatives/brasil/collection_10/lulc/coverage/brazil_coverage_{year}.tif"}
 FOREST=[3,6,5,49]
 OPEN_NATIVE=[4,7,11,12,77,84,50,32]
 PIXEL=30
@@ -76,22 +76,29 @@ def main():
     p.add_argument("--start",type=int)
     p.add_argument("--end",type=int)
     p.add_argument("--refresh",action="store_true")
+    p.add_argument("--collection",type=int,choices=(10,11),default=10)
+    p.add_argument("--check-only",action="store_true")
     args=p.parse_args()
     folder=ROOT/"data/v3"/str(args.cell_km)
     grid=gpd.read_parquet(folder/"grid.parquet")
     annual=pd.read_parquet(folder/"annual.parquet")
     with (folder/"grid.parquet").open("rb") as f:
         grid_hash=hashlib.file_digest(f,"sha256").hexdigest()
-    years=[int(y) for y in sorted(annual.year.unique()) if (args.start is None or y>=args.start) and (args.end is None or y<=args.end) and 1986<=y<=2026]
+    years=[int(y) for y in sorted(annual.year.unique()) if (args.start is None or y>=args.start) and (args.end is None or y<=args.end) and 1986<=y<=(2026 if args.collection==11 else 2025)]
     if not years: raise ValueError("Nenhum ano com cobertura anterior disponível")
-    cache=folder/"mapbiomas11"/grid_hash
+    cache=folder/f"mapbiomas{args.collection}"/grid_hash
     cache.mkdir(parents=True,exist_ok=True)
+    if args.check_only:
+        for year in years:
+            print(f"[VERIFICANDO] Coleção {args.collection}, {year-1}",flush=True)
+            remote_raster(URLS[args.collection].format(year=year-1))
+        return
     for year in years:
         base=year-1
         path=cache/f"{year}.parquet"
         if path.exists() and not args.refresh:
             print(f"[CACHE] MapBiomas {base}",flush=True);continue
-        url=URL.format(year=base)
+        url=URLS[args.collection].format(year=base)
         print(f"[MAPBIOMAS] {base} → PRODES {year}",flush=True)
         source=remote_raster(url)
         with rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR",CPL_VSIL_CURL_USE_HEAD="NO",
@@ -101,6 +108,7 @@ def main():
         if result.valid_ha.sum()<=0: raise ValueError(f"Raster sem dados válidos: {base}")
         result["year"]=year
         result["cover_year"]=base
+        result["collection"]=args.collection
         result["coverage_fraction"]=result.valid_ha/result.sampled_ha.replace(0,np.nan)
         result["source_url"]=url
         result["retrieved_utc"]=datetime.now(timezone.utc).isoformat()
@@ -109,7 +117,7 @@ def main():
     all_data=pd.concat([pd.read_parquet(p) for p in sorted(cache.glob("*.parquet"))],ignore_index=True)
     tmp=folder/"environment.tmp"
     all_data.to_parquet(tmp,index=False);tmp.replace(folder/"environment.parquet")
-    (folder/"environment_manifest.json").write_text(json.dumps({"collection":11,"grid_sha256":grid_hash,"pixel_m":PIXEL,"forest_codes":FOREST,"open_native_codes":OPEN_NATIVE,"years":sorted(map(int,all_data.year.unique()))},indent=2))
+    (folder/"environment_manifest.json").write_text(json.dumps({"collection":args.collection,"grid_sha256":grid_hash,"pixel_m":PIXEL,"forest_codes":FOREST,"open_native_codes":OPEN_NATIVE,"years":sorted(map(int,all_data.year.unique()))},indent=2))
     print("[OK] Cobertura histórica disponível",flush=True)
 
 if __name__=="__main__":
