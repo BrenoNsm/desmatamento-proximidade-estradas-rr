@@ -286,3 +286,8 @@ def environment_map(resolution:int=5,start:int=2008,end:int=2024):
     ratio=ratio.where((last.coverage_fraction>=.95)&(last.forest_ha>=1))
     g["forest_ratio"]=g.cell_id.map(ratio)
     return Response(g.to_json(drop_id=True),media_type="application/geo+json")
+
+@app.get("/api/proximity/export")
+def proximity_export(resolution:int=5,start:int=2008,end:int=2024):
+    data=proximity(resolution,start,end)
+    return Response(pd.DataFrame(data["annual"]).to_csv(index=False),media_type="text/csv",headers={"Content-Disposition":"attachment; filename=proximity.csv"})
