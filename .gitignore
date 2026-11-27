@@ -3,3 +3,6 @@ data/
 __pycache__/
 .pytest_cache/
 research_v2.json
+
+frontend/node_modules/
+frontend/dist/
