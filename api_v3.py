@@ -403,3 +403,8 @@ def catalog(resolution:int=5):
     return {"resolutions":[r for r in (2,5,10,20) if (ROOT/"data/v3"/str(r)/"grid.parquet").exists()],
             "mapbiomas_years":lc["manifest"]["years"] if lc["available"] else [],"prodes_years":years,
             "cells":len(g),"resolution":resolution}
+
+@app.get("/api/landcover/narrative")
+def landcover_narrative(resolution:int=5):
+    from environment_narrative import read_analysis
+    return read_analysis(landcover(resolution),resolution)
