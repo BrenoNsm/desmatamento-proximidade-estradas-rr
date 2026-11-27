@@ -4,12 +4,29 @@ import json
 import time
 import urllib.parse
 import urllib.request
+import urllib.error
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 def sha(path):
     with path.open("rb") as f:
         return hashlib.file_digest(f, "sha256").hexdigest()
+
+def request_wfs(endpoint, params, attempts=6):
+    url = endpoint + "?" + urllib.parse.urlencode(params)
+    for attempt in range(attempts):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent":"GeoForestLab/3.0"})
+            with urllib.request.urlopen(req, timeout=180) as r:
+                return r.read()
+        except OSError as exc:
+            if isinstance(exc, urllib.error.HTTPError) and exc.code not in (408,429,500,502,503,504):
+                raise
+            if attempt == attempts-1:
+                raise RuntimeError(f"INPE WFS indisponível após {attempts} tentativas: {params.get('typeNames','catálogo')}. Último erro: {exc}. Execute novamente mais tarde; os caches concluídos foram preservados.") from exc
+            delay = min(60, 5 * 2**attempt)
+            print(f"[INPE] {exc}; nova tentativa {attempt+2}/{attempts} em {delay}s", flush=True)
+            time.sleep(delay)
 
 def acquire_prodes(spec, cache):
     cache.mkdir(parents=True, exist_ok=True)
@@ -18,20 +35,11 @@ def acquire_prodes(spec, cache):
     if path.exists() and receipt.exists():
         saved = json.loads(receipt.read_text(encoding="utf-8"))
         if saved.get("spec") == spec and saved.get("sha256") == sha(path):
-            print("[CACHE] PRODES", flush=True)
+            print(f"[CACHE] {spec['layer']}", flush=True)
             return path, saved
 
     def request(params):
-        url = spec["wfs"] + "?" + urllib.parse.urlencode(params)
-        for attempt in range(3):
-            try:
-                req = urllib.request.Request(url, headers={"User-Agent":"RR-research-v2/1.0"})
-                with urllib.request.urlopen(req, timeout=180) as r:
-                    return r.read()
-            except OSError:
-                if attempt == 2:
-                    raise
-                time.sleep(2**attempt)
+        return request_wfs(spec["wfs"], params)
 
     base = {"service":"WFS", "version":"2.0.0", "request":"GetFeature",
             "typeNames":spec["layer"], "srsName":"EPSG:4326",
@@ -42,7 +50,7 @@ def acquire_prodes(spec, cache):
     total = int(hits.attrib["numberMatched"])
     if total <= 0:
         raise RuntimeError("INPE WFS retornou zero feições")
-    print(f"[DOWNLOAD] PRODES: {total} feições na região", flush=True)
+    print(f"[DOWNLOAD] {spec['layer']}: {total} feições na região", flush=True)
     features, ids = [], set()
     while len(features) < total:
         page = json.loads(request(dict(base, outputFormat="application/json",
@@ -56,7 +64,7 @@ def acquire_prodes(spec, cache):
                 raise RuntimeError("Paginação WFS sem IDs únicos; não é seguro prosseguir")
             ids.add(key)
         features.extend(batch)
-        print(f"[PRODES] {len(features)}/{total}", flush=True)
+        print(f"[WFS] {len(features)}/{total}", flush=True)
     if len(features) != total:
         raise RuntimeError("Quantidade WFS divergente")
     temp = path.with_suffix(".tmp")
