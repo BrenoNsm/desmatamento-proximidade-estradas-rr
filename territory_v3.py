@@ -7,7 +7,7 @@ import geopandas as gpd
 import pandas as pd
 from shapely import union_all
 from pipeline_v2 import AREA, polygons
-from environment_inpe_v3 import ENDPOINT, catalogue, union_by_cell
+from environment_inpe_v3 import ENDPOINT, union_by_cell
 from download_prodes_v2 import acquire_prodes, sha
 
 ROOT=Path(__file__).resolve().parent
@@ -60,16 +60,15 @@ def main():
     folder=ROOT/"data/v3"/str(args.cell_km)
     grid=gpd.read_parquet(folder/"grid.parquet")
     fragments=ROOT/"data/v2/fragments.parquet"
-    layers=catalogue();inputs={};sources={}
+    inputs={};sources={}
     for role,short in LAYERS.items():
         name="prodes-amazon-nb:"+short
-        if name not in layers:raise ValueError(f"Camada ausente no catálogo: {name}")
         print(f"[INPE] {role}: {name}",flush=True)
         path,receipt=acquire_prodes({"wfs":ENDPOINT,"layer":name},ROOT/"data/downloads_v3/inpe"/role)
         raw=gpd.read_file(path)
         if raw.crs is None:raise ValueError(f"CRS ausente: {role}")
         inputs[role]=polygons(raw.to_crs(AREA))
-        sources[role]=dict(receipt,catalogue_title=layers[name])
+        sources[role]=dict(receipt,layer=name)
     print("[TERRITÓRIO] Calculando frações e sobreposições por célula",flush=True)
     cov,zones=partition(grid,**inputs)
     annual=annual_by_zone(gpd.read_parquet(fragments),zones)
