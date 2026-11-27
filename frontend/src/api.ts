@@ -1,7 +1,7 @@
 import type {FeatureCollection,Geometry} from 'geojson';
 export type Filters={resolution:number;start:number;end:number};
 export type Meta={years:number[];resolutions:number[];cells:number;manifest:unknown;environment_years?:number[]};
-export type Cell={cell_id:string;area_ha:number;territory_ha:number;intensity:number;distance_km:number;road_density:number;cluster?:string;forest_pct?:number;forest_ha?:number;forest_ratio?:number|null;ring_id?:string};
+export type Cell={cell_id:string;area_ha:number;territory_ha:number;intensity:number;distance_km:number;road_density:number;cluster?:string;forest_pct?:number;forest_ha?:number;forest_ratio?:number|null;ring_id?:string;cover_pct?:number|null;cover_ha?:number|null;sampled_ha?:number|null;missing_pct?:number|null};
 export type Grid=FeatureCollection<Geometry,Cell>;
 export type Annual={year:number;area_ha:number;intensity:number};
 export type Band={band:string;area_ha:number;territory_ha:number;cells:number;intensity:number|null};
