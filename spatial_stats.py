@@ -42,7 +42,7 @@ def moran(values,i,j,permutations=999,seed=42):
     classes=np.where((z>0)&(lag>0),"HH",np.where((z<0)&(lag<0),"LL",np.where(z>0,"HL","LH")))
     idx=np.flatnonzero(active)
     return {"global":{"I":observed,"expected":expected,"p":float(gp),"n":len(z),"islands":int((~active).sum()),"permutations":permutations,"seed":seed},
-            "local":[{"index":int(ix),"I":float(val),"p":float(pv),"q":float(qv),"cluster":str(c) if qv<=.05 else "NS"} for ix,val,pv,qv,c in zip(idx,local,p,q,classes)]}
+            "local":[{"index":int(ix),"I":float(val),"p":float(pv),"q":float(qv),"cluster":str(c) if qv<=.05 else "NS","z":float(zz),"lag":float(ll)} for ix,val,pv,qv,c,zz,ll in zip(idx,local,p,q,classes,z,lag)]}
 
 def association(distance, intensity):
     x=np.asarray(distance); y=np.asarray(intensity)
