@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 from spatial_stats import moran, association
 
 ROOT=Path(__file__).resolve().parent
@@ -23,14 +24,26 @@ def dataset(resolution):
         raise HTTPException(404,f"Execute python research_grid.py --cell-km {resolution}")
     return load(resolution,p.stat().st_mtime_ns)
 
+FRONTEND = ROOT / "frontend" / "dist"
+if (FRONTEND / "assets").is_dir():
+    app.mount("/assets", StaticFiles(directory=FRONTEND / "assets"), name="frontend-assets")
+
 @app.get("/")
 def index():
-    return FileResponse(ROOT/"web_v3.html")
+    return FileResponse(FRONTEND/"index.html" if (FRONTEND/"index.html").exists() else ROOT/"web_v3.html")
 
 @app.get("/api/meta")
 def meta(resolution:int=5):
     g,a,m=dataset(resolution)
-    return {"years":m["years"],"cells":len(g),"manifest":m,
+    folder=ROOT/"data/v3"/str(resolution)
+    env_path=folder/"environment_manifest.json"
+    env_years=[]
+    if env_path.exists() and (folder/"environment.parquet").exists():
+        from download_prodes_v2 import sha
+        env_manifest=json.loads(env_path.read_text())
+        if env_manifest.get("grid_sha256")==sha(folder/"grid.parquet"):
+            env_years=env_manifest.get("years",[])
+    return {"years":m["years"],"cells":len(g),"manifest":m,"environment_years":env_years,
             "resolutions":[r for r in (2,5,10,20) if (ROOT/"data/v3"/str(r)/"manifest.json").exists()]}
 
 def filtered(resolution,start,end):
