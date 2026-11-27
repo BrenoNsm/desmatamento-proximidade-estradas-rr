@@ -131,10 +131,21 @@ def environment(resolution:int=5,start:int=2008,end:int=2024):
             "note":"Razão de incremento PRODES por proxy de disponibilidade florestal anterior. Consulte o manifesto ambiental para identificar a fonte e as limitações. Faixas agregadas por hectare-ano."}
 
 @app.get("/api/model")
-def model(resolution:int=5,start:int=2008,end:int=2024):
+def model(resolution:int=5,start:int=2008,end:int=2024,exposure:str="forest"):
     from model_v3 import fit_model
     try:
-        return fit_model(environmental_sample(resolution,start,end),resolution)
+        if exposure=="forest":
+            d=environmental_sample(resolution,start,end)
+        elif exposure=="territory":
+            g,a,m=filtered(resolution,start,end)
+            d=a.merge(g.drop(columns=["geometry","area_ha","intensity"]),on="cell_id",validate="many_to_one")
+            d["forest_ha"]=d.territory_ha
+            d["coverage_fraction"]=1.0
+        else:raise HTTPException(422,"Exposição inválida")
+        result=fit_model(d,resolution)
+        result["exposure"]=exposure
+        if exposure=="territory":result["note"]="PPML com offset de área territorial, não florestal; efeitos anuais e erros agrupados em blocos de 50 km. Associação exploratória, não causal."
+        return result
     except (ValueError, ArithmeticError) as e:
         raise HTTPException(422,str(e)) from e
 
@@ -232,3 +243,46 @@ def roads(detail:str="all"):
     if not path.exists():
         raise HTTPException(404,"Malha viária processada não encontrada em data/v2/roads.parquet")
     return Response(road_geojson(path.stat().st_mtime_ns,detail),media_type="application/geo+json",headers={"Cache-Control":"no-cache"})
+
+@app.get("/api/proximity")
+def proximity(resolution:int=5,start:int=2008,end:int=2024):
+    g,a,m=filtered(resolution,start,end)
+    import duckdb
+    with duckdb.connect(str(ROOT/"data/v2/research.duckdb"),read_only=True) as con:
+        zones=con.execute("SELECT ring_id,SUM(zone_ha) AS territory_ha FROM zones GROUP BY ring_id").df()
+        annual=con.execute("SELECT year,ring_id,SUM(area_ha) AS area_ha FROM annual WHERE year BETWEEN ? AND ? GROUP BY year,ring_id",[start,end]).df()
+    order=["0-5km","5-10km","10-20km",">20km"]
+    years=sorted(map(int,a.year.unique()))
+    base=pd.MultiIndex.from_product([years,order],names=["year","ring_id"]).to_frame(index=False)
+    annual=base.merge(annual,on=["year","ring_id"],how="left").merge(zones,on="ring_id",how="left").fillna({"area_ha":0,"territory_ha":0})
+    annual["intensity"]=100*annual.area_ha/annual.territory_ha.replace(0,np.nan)
+    summary=annual.groupby("ring_id",as_index=False).agg(area_ha=("area_ha","sum"),territory_ha=("territory_ha","first")).set_index("ring_id").reindex(order).reset_index()
+    summary["intensity"]=100*summary.area_ha/summary.territory_ha.replace(0,np.nan)
+    summary["share_pct"]=100*summary.area_ha/summary.area_ha.sum() if summary.area_ha.sum()>0 else 0
+    return {"bands":json.loads(summary.to_json(orient="records")),"annual":json.loads(annual.to_json(orient="records"))}
+
+@lru_cache(maxsize=1)
+def buffer_geojson(stamp):
+    z=gpd.read_parquet(ROOT/"data/v2/zones.parquet")
+    z=z[["ring_id","geometry"]].dissolve(by="ring_id").reset_index().to_crs(4326)
+    z.geometry=z.geometry.simplify(.00015,preserve_topology=True)
+    return z.to_json(drop_id=True)
+
+@app.get("/api/proximity/map")
+def proximity_map():
+    p=ROOT/"data/v2/zones.parquet"
+    return Response(buffer_geojson(p.stat().st_mtime_ns),media_type="application/geo+json")
+
+@app.get("/api/environment/map")
+def environment_map(resolution:int=5,start:int=2008,end:int=2024):
+    d=environmental_sample(resolution,start,end)
+    g,a,m=filtered(resolution,start,end)
+    year=int(d.year.max())
+    last=d[d.year==year].set_index("cell_id")
+    g["forest_pct"]=100*g.cell_id.map(last.forest_ha)/g.territory_ha
+    g["forest_ha"]=g.cell_id.map(last.forest_ha)
+    # Exposure-normalized annual value, masked using the same eligibility rule.
+    ratio=100*last.area_ha/last.forest_ha.replace(0,np.nan)
+    ratio=ratio.where((last.coverage_fraction>=.95)&(last.forest_ha>=1))
+    g["forest_ratio"]=g.cell_id.map(ratio)
+    return Response(g.to_json(drop_id=True),media_type="application/geo+json")
