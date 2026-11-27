@@ -1,4 +1,4 @@
-import {ResponsiveContainer,AreaChart,Area,BarChart,Bar,CartesianGrid,XAxis,YAxis,Tooltip,ScatterChart,Scatter} from 'recharts';
+import {ResponsiveContainer,AreaChart,Area,BarChart,Bar,CartesianGrid,XAxis,YAxis,Tooltip,ScatterChart,Scatter as RechartsScatter} from 'recharts';
 import type {Analysis,Grid,Environment} from './api';
 import {fmt} from './api';
 const green='#287d65',gridColor='#e5ebe7';
@@ -13,6 +13,6 @@ export function Heatmap({analysis}:{analysis:Analysis}){
 }
 export function Scatter({grid}:{grid:Grid}){
  const data=grid.features.map(f=>f.properties);
- return <div className="chart"><ResponsiveContainer><ScatterChart margin={{left:10,right:15,top:10,bottom:15}}><CartesianGrid stroke={gridColor}/><XAxis dataKey="distance_km" type="number" name="Distância" unit=" km" tick={{fontSize:11}}/><YAxis dataKey="intensity" type="number" name="Proporção" unit="%" tick={{fontSize:11}}/><Tooltip cursor={{strokeDasharray:'3 3'}}/><Scatter data={data} fill={green} fillOpacity={.35} line={false}/></ScatterChart></ResponsiveContainer></div>
+ return <div className="chart"><ResponsiveContainer><ScatterChart margin={{left:10,right:15,top:10,bottom:15}}><CartesianGrid stroke={gridColor}/><XAxis dataKey="distance_km" type="number" name="Distância" unit=" km" tick={{fontSize:11}}/><YAxis dataKey="intensity" type="number" name="Proporção" unit="%" tick={{fontSize:11}}/><Tooltip cursor={{strokeDasharray:'3 3'}}/><RechartsScatter data={data} fill={green} fillOpacity={.35} line={false}/></ScatterChart></ResponsiveContainer></div>
 }
 export function EnvironmentCharts({data}:{data:Environment}){return <div className="two-col"><ChartPanel title="Disponibilidade florestal histórica" subtitle="Proxy PRODES do ano anterior, em hectares"><Series data={data.annual} x="year" y="forest_ha" unit="ha"/></ChartPanel><ChartPanel title="Incremento relativo à floresta anterior" subtitle="Por faixa de distância; hectares-ano"><Series data={data.bands} x="band" y="ratio_pct" unit="%" kind="bar"/></ChartPanel><ChartPanel title="Evolução da razão anual" subtitle="Incremento / proxy de disponibilidade anterior (%)"><Series data={data.annual} x="year" y="ratio_pct" unit="%"/></ChartPanel></div>}
