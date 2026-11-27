@@ -291,3 +291,27 @@ def environment_map(resolution:int=5,start:int=2008,end:int=2024):
 def proximity_export(resolution:int=5,start:int=2008,end:int=2024):
     data=proximity(resolution,start,end)
     return Response(pd.DataFrame(data["annual"]).to_csv(index=False),media_type="text/csv",headers={"Content-Disposition":"attachment; filename=proximity.csv"})
+
+@app.get("/api/landcover")
+def landcover(resolution:int=5):
+    from landcover_v3 import sha
+    folder=ROOT/"data/v3"/str(resolution)
+    target=folder/"landcover"
+    if not (target/"manifest.json").exists():
+        return {"available":False,"message":"MapBiomas ainda não processado para esta grade."}
+    m=json.loads((target/"manifest.json").read_text())
+    if m["grid_sha256"]!=sha(folder/"grid.parquet"):
+        raise HTTPException(409,"Grade alterada; reprocesse MapBiomas")
+    c=pd.read_parquet(target/"coverage.parquet")
+    t=pd.read_parquet(target/"transitions.parquet")
+    annual=c.groupby(["year","code"],as_index=False).area_ha.sum()
+    transitions=t.groupby(["from_code","to_code"],as_index=False).area_ha.sum()
+    return {"available":True,"manifest":m,"annual":json.loads(annual.to_json(orient="records")),
+            "transitions":json.loads(transitions.to_json(orient="records"))}
+
+@app.get("/api/landcover/export")
+def landcover_export(resolution:int=5,kind:str="coverage"):
+    if kind not in ("coverage","transitions"):raise HTTPException(422,"Tipo inválido")
+    if not landcover(resolution)["available"]:raise HTTPException(404,"MapBiomas não processado")
+    p=ROOT/"data/v3"/str(resolution)/"landcover"/(kind+".parquet")
+    return Response(pd.read_parquet(p).to_csv(index=False),media_type="text/csv",headers={"Content-Disposition":f"attachment; filename=mapbiomas-{kind}.csv"})
