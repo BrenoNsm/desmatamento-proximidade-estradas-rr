@@ -14,7 +14,7 @@ from urllib.error import HTTPError, URLError
 ROOT=Path(__file__).resolve().parent
 MODEL="nvidia/nemotron-3.5-lightning-30b-a3b"
 ENDPOINT="https://integrate.api.nvidia.com/v1/chat/completions"
-VERSION=3
+VERSION=4
 SKILL=ROOT/'skills/humanize-portugues-br/SKILL.md'
 
 def scenarios(info):
@@ -105,15 +105,63 @@ def payload(info,resolution):
 def fingerprint(data):
     return hashlib.sha256(json.dumps(data,sort_keys=True,ensure_ascii=False,separators=(",",":"),allow_nan=False).encode()).hexdigest()
 
+SECTION_KEYS=("landscape","transitions","rain","fire","scenarios","limitations")
+SECTION_ALIASES={
+    "landscape":("landscape","paisagem","paisagem_atual"),
+    "transitions":("transitions","transformacoes","transformações","transformacoes_territoriais","mudancas"),
+    "rain":("rain","precipitacao","precipitação","chuva"),
+    "fire":("fire","fogo","fogo_ativo","queimadas"),
+    "scenarios":("scenarios","cenarios","cenários","cenarios_futuros"),
+    "limitations":("limitations","limitacoes","limitações","limites","limites_da_interpretacao"),
+}
+
+def normalize_sections(value):
+    """Normalize structured prose without inventing or relabeling missing topics."""
+    import re
+    def prose(v):
+        if isinstance(v,str):
+            return re.sub(r"\s+"," ",v).strip()
+        if isinstance(v,list) and v and all(isinstance(x,str) for x in v):
+            return " ".join(prose(x) for x in v).strip()
+        if isinstance(v,dict):
+            for key in ("text","content","paragraph","texto","conteudo","conteúdo"):
+                if key in v:return prose(v[key])
+        return ""
+    def section_key(label):
+        if not isinstance(label,str):return None
+        label=re.sub(r"[\s-]+","_",label.strip().lower())
+        return next((k for k,aliases in SECTION_ALIASES.items() if label in aliases),None)
+    if isinstance(value,dict):
+        grouped={}
+        for k,v in value.items():
+            key=section_key(k)
+            if key and prose(v):grouped[key]=prose(v)
+        if all(k in grouped for k in SECTION_KEYS):return [grouped[k] for k in SECTION_KEYS]
+        raise RuntimeError("Seções IA ausentes: "+", ".join(k for k in SECTION_KEYS if k not in grouped))
+    if isinstance(value,list):
+        if value and all(isinstance(x,dict) for x in value):
+            grouped={}
+            for v in value:
+                key=section_key(v.get("section",v.get("topic",v.get("title",v.get("id")))))
+                if key and prose(v):grouped[key]=(grouped.get(key,"")+" "+prose(v)).strip()
+            if grouped:
+                return normalize_sections(grouped)
+        if len(value)==6 and all(prose(v) for v in value):return [prose(v) for v in value]
+        raise RuntimeError(f"Esperadas seis seções identificáveis; modelo retornou {len(value)} itens")
+    if isinstance(value,str):
+        parts=re.split(r"\n\s*\n",value.strip())
+        if len(parts)==6 and all(prose(v) for v in parts):return [prose(v) for v in parts]
+    raise RuntimeError("Formato de seções IA inválido: "+type(value).__name__)
+
 def parse_output(text,data):
     raw=text.strip()
     if raw.startswith("```"):
         raw=raw.split("\n",1)[1].rsplit("```",1)[0].strip()
     try: obj=json.loads(raw)
     except (ValueError,IndexError):raise RuntimeError("Resposta IA fora do formato JSON; não armazenada") from None
-    paragraphs=obj.get("paragraphs") if isinstance(obj,dict) else None
-    if not isinstance(paragraphs,list) or len(paragraphs)!=6 or not all(isinstance(p,str) and p.strip() for p in paragraphs):
-        raise RuntimeError("Parágrafos inválidos; não armazenados")
+    if not isinstance(obj,dict):
+        raise RuntimeError("Resposta IA deve ser um objeto JSON")
+    paragraphs=normalize_sections(obj.get("paragraphs"))
     rows=obj.get("forecast")
     years=data["years"]; base=max(years)
     codes={int(c) for c in data["groups"] if int(c) not in (0,10)}
@@ -162,7 +210,7 @@ def generate(info,resolution):
         time.sleep(max(0,3-(time.time()-(float(raw) if raw else 0))))
         lock.seek(0);lock.truncate();lock.write(str(time.time()));lock.flush();os.fsync(lock.fileno())
         model=os.environ.get("NVIDIA_MODEL",MODEL)
-        system=SKILL.read_text(encoding="utf-8")+"\n\n"+"""Interprete estatísticas ambientais para público geral em português brasileiro. Use exclusivamente o JSON fornecido. Produza seis parágrafos curtos de texto puro, nesta ordem: paisagem no ano recente; mudanças entre extremos; precipitação; fogo ativo; cenários futuros e suas hipóteses; limitações e como interpretar. Nos parágrafos de chuva e fogo, use os resumos calculados em monitoring, com números, unidades e datas efetivamente disponíveis. Compare anos completos ou os mesmos meses completos (same_month_comparison); nunca trate o acumulado parcial como ano completo. Explique a sazonalidade e a situação recente, identificando meses incompletos. Não confunda pixel-dias de detecção com hectares queimados ou incêndios únicos. Não atribua causalidade entre chuva, fogo e uso da terra. Se uma fonte estiver ausente, diga isso explicitamente, sem inventar resultados. Diferencie estoque, transição e cenário. Não invente números, causas, municípios, previsões ou probabilidades. Não chame toda mudança de desmatamento. Indique denominadores de percentuais. Grupos analíticos sujeitos a validação; códigos 0 e 10 não reconhecidos. Não infira causalidade ou legalidade. Uma série anual curta não valida previsão. Os indicadores recentes de chuva e fogo podem contextualizar a hipótese de cobertura, mas não são um modelo causal nem previsão meteorológica. Retorne exclusivamente um objeto JSON com paragraphs (lista de seis strings), assumptions (string explicando premissas do seu próprio cenário) e forecast (lista de objetos code, year, area_ha). Gere uma trajetória própria de IA para cada código reconhecido (exclua 0 e 10) para cada um dos três anos seguintes ao último observado. Use os dados históricos como base e os cenários matemáticos apenas como referência, não copie automaticamente. Preserve a soma das áreas reconhecidas do último ano em cada ano futuro, tolerância 0,1%, valores não negativos. Não invente evidência externa. Identifique sua trajetória como hipótese exploratória sem validação. A estrutura JSON é para a aplicação, não para o leitor."""
+        system=SKILL.read_text(encoding="utf-8")+"\n\n"+"""Interprete estatísticas ambientais para público geral em português brasileiro. Use exclusivamente o JSON fornecido. Produza seis parágrafos curtos de texto puro, nesta ordem: paisagem no ano recente; mudanças entre extremos; precipitação; fogo ativo; cenários futuros e suas hipóteses; limitações e como interpretar. Nos parágrafos de chuva e fogo, use os resumos calculados em monitoring, com números, unidades e datas efetivamente disponíveis. Compare anos completos ou os mesmos meses completos (same_month_comparison); nunca trate o acumulado parcial como ano completo. Explique a sazonalidade e a situação recente, identificando meses incompletos. Não confunda pixel-dias de detecção com hectares queimados ou incêndios únicos. Não atribua causalidade entre chuva, fogo e uso da terra. Se uma fonte estiver ausente, diga isso explicitamente, sem inventar resultados. Diferencie estoque, transição e cenário. Não invente números, causas, municípios, previsões ou probabilidades. Não chame toda mudança de desmatamento. Indique denominadores de percentuais. Grupos analíticos sujeitos a validação; códigos 0 e 10 não reconhecidos. Não infira causalidade ou legalidade. Uma série anual curta não valida previsão. Os indicadores recentes de chuva e fogo podem contextualizar a hipótese de cobertura, mas não são um modelo causal nem previsão meteorológica. Retorne exclusivamente um objeto JSON com paragraphs (objeto com exatamente seis chaves: landscape, transitions, rain, fire, scenarios, limitations; cada valor deve ser uma string em português brasileiro, não uma lista). Exemplo de estrutura: {\"paragraphs\":{\"landscape\":\"texto\",\"transitions\":\"texto\",\"rain\":\"texto\",\"fire\":\"texto\",\"scenarios\":\"texto\",\"limitations\":\"texto\"},\"assumptions\":\"texto\",\"forecast\":[]}. O exemplo de forecast vazio é apenas estrutural: preencha todas as linhas exigidas, assumptions (string explicando premissas do seu próprio cenário) e forecast (lista de objetos code, year, area_ha). Gere uma trajetória própria de IA para cada código reconhecido (exclua 0 e 10) para cada um dos três anos seguintes ao último observado. Use os dados históricos como base e os cenários matemáticos apenas como referência, não copie automaticamente. Preserve a soma das áreas reconhecidas do último ano em cada ano futuro, tolerância 0,1%, valores não negativos. Não invente evidência externa. Identifique sua trajetória como hipótese exploratória sem validação. A estrutura JSON é para a aplicação, não para o leitor."""
         body={"model":model,"messages":[{"role":"system","content":system},{"role":"user","content":json.dumps(data,ensure_ascii=False)}],"temperature":0.2,"max_tokens":8192,"stream":False}
         if model==MODEL:
             body["chat_template_kwargs"]={"enable_thinking":False}
@@ -173,7 +221,12 @@ def generate(info,resolution):
         except (URLError,TimeoutError):raise RuntimeError("Falha de conexão com NVIDIA; nenhuma repetição automática.") from None
         choice=result["choices"][0];text=choice["message"].get("content")
         if choice.get("finish_reason")=="length" or not isinstance(text,str) or not text.strip():raise RuntimeError("Resposta vazia ou truncada; não armazenada")
-        text,forecast,assumptions=parse_output(text,data)
+        try:
+            text,forecast,assumptions=parse_output(text,data)
+        except RuntimeError as e:
+            diagnostic=folder/(digest+".invalid.json")
+            diagnostic.write_text(json.dumps({"error":str(e),"response":text},ensure_ascii=False,indent=2),encoding="utf-8")
+            raise RuntimeError(f"{e}. Resposta preservada localmente em {diagnostic}; nenhuma repetição automática.") from None
         saved={"forecast":forecast,"assumptions":assumptions,"fingerprint":digest,"model":model,"created_utc":datetime.now(timezone.utc).isoformat(),"prompt_version":VERSION,"text":text.strip(),"years":data["years"],"monitoring_sources":{k:{"last_date":v["catalog_last_date"],"unit":v["unit"]} for k,v in data["monitoring"].get("sources",{}).items()}}
         tmp=target.with_suffix(".tmp");tmp.write_text(json.dumps(saved,ensure_ascii=False,indent=2),encoding="utf-8");tmp.replace(target)
         return {"status":"ready",**saved}
