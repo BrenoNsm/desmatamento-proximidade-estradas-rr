@@ -5,6 +5,7 @@ import json
 import os
 import time
 import fcntl
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.request import Request, urlopen
@@ -13,7 +14,8 @@ from urllib.error import HTTPError, URLError
 ROOT=Path(__file__).resolve().parent
 MODEL="nvidia/nemotron-3.5-lightning-30b-a3b"
 ENDPOINT="https://integrate.api.nvidia.com/v1/chat/completions"
-VERSION=1
+VERSION=2
+SKILL=ROOT/'skills/humanize-portugues-br/SKILL.md'
 
 def scenarios(info):
     years=sorted(info["manifest"]["years"])
@@ -52,6 +54,36 @@ def payload(info,resolution):
 def fingerprint(data):
     return hashlib.sha256(json.dumps(data,sort_keys=True,ensure_ascii=False,separators=(",",":"),allow_nan=False).encode()).hexdigest()
 
+def parse_output(text,data):
+    raw=text.strip()
+    if raw.startswith("```"):
+        raw=raw.split("\n",1)[1].rsplit("```",1)[0].strip()
+    try: obj=json.loads(raw)
+    except (ValueError,IndexError):raise RuntimeError("Resposta IA fora do formato JSON; não armazenada") from None
+    paragraphs=obj.get("paragraphs") if isinstance(obj,dict) else None
+    if not isinstance(paragraphs,list) or not paragraphs or not all(isinstance(p,str) and p.strip() for p in paragraphs):
+        raise RuntimeError("Parágrafos inválidos; não armazenados")
+    rows=obj.get("forecast")
+    years=data["years"]; base=max(years)
+    codes={int(c) for c in data["groups"] if int(c) not in (0,10)}
+    total=sum(float(r["area_ha"]) for r in data["annual"] if r["year"]==base and r["code"] in codes)
+    expected={(c,y) for c in codes for y in range(base+1,base+4)}
+    if not isinstance(rows,list):raise RuntimeError("Projeção IA ausente")
+    clean=[];seen=set()
+    for r in rows:
+        if not isinstance(r,dict):raise RuntimeError("Linha IA inválida")
+        c,y,v=r.get("code"),r.get("year"),r.get("area_ha")
+        if type(c) is not int or type(y) is not int or (c,y) not in expected or (c,y) in seen or type(v) not in (int,float) or not math.isfinite(v) or not 0<=v<=total:
+            raise RuntimeError("Projeção IA inválida; não armazenada")
+        seen.add((c,y));clean.append({"code":c,"year":y,"area_ha":float(v)})
+    if seen!=expected:raise RuntimeError("Projeção IA incompleta")
+    for y in range(base+1,base+4):
+        if abs(sum(r["area_ha"] for r in clean if r["year"]==y)-total)>max(1,total*.001):
+            raise RuntimeError("Projeção IA não conserva área reconhecida (tolerância 0,1%)")
+    assumptions=obj.get("assumptions")
+    if not isinstance(assumptions,str) or not assumptions.strip():raise RuntimeError("Premissas IA ausentes")
+    return "\n\n".join(p.strip() for p in paragraphs),clean,assumptions.strip()
+
 def read_analysis(info,resolution):
     if not info["available"]:return {"status":"unavailable"}
     data=payload(info,resolution)
@@ -59,7 +91,9 @@ def read_analysis(info,resolution):
     p=ROOT/"data/v3"/str(resolution)/"landcover"/"narratives"/(digest+".json")
     base={"fingerprint":digest,"scenarios":data["scenarios"]}
     if not p.exists():return {"status":"pending",**base}
-    return {"status":"ready",**base,**json.loads(p.read_text())}
+    saved=json.loads(p.read_text())
+    if saved.get("prompt_version")!=VERSION:return {"status":"pending",**base}
+    return {"status":"ready",**base,**saved}
 
 def generate(info,resolution):
     data=payload(info,resolution)
@@ -70,15 +104,15 @@ def generate(info,resolution):
     lockpath=ROOT/"data"/"nvidia-rate.lock"
     with lockpath.open("a+") as lock:
         fcntl.flock(lock,fcntl.LOCK_EX)
-        if target.exists():return read_analysis(info,resolution)
+        if target.exists() and read_analysis(info,resolution)['status']=='ready':return read_analysis(info,resolution)
         key=os.environ.get("NVIDIA_API_KEY")
         if not key:raise RuntimeError("Defina NVIDIA_API_KEY no terminal")
         lock.seek(0);raw=lock.read().strip()
         time.sleep(max(0,3-(time.time()-(float(raw) if raw else 0))))
         lock.seek(0);lock.truncate();lock.write(str(time.time()));lock.flush();os.fsync(lock.fileno())
         model=os.environ.get("NVIDIA_MODEL",MODEL)
-        system="""Interprete estatísticas ambientais para público geral em português brasileiro. Use exclusivamente o JSON fornecido. Produza quatro parágrafos curtos de texto puro: paisagem no ano recente; mudanças entre extremos; explicação dos cenários futuros calculados e suas hipóteses; limitações e como interpretar. Diferencie estoque, transição e cenário. Não invente números, causas, municípios, previsões ou probabilidades. Não chame toda mudança de desmatamento. Indique denominadores de percentuais. Grupos analíticos sujeitos a validação; códigos 0 e 10 não reconhecidos. Não infira causalidade ou legalidade. Três anos não validam previsão."""
-        body={"model":model,"messages":[{"role":"system","content":system},{"role":"user","content":json.dumps(data,ensure_ascii=False)}],"temperature":0.2,"max_tokens":4096,"stream":False}
+        system=SKILL.read_text(encoding="utf-8")+"\\n\\n"+"""Interprete estatísticas ambientais para público geral em português brasileiro. Use exclusivamente o JSON fornecido. Produza quatro parágrafos curtos de texto puro: paisagem no ano recente; mudanças entre extremos; explicação dos cenários futuros calculados e suas hipóteses; limitações e como interpretar. Diferencie estoque, transição e cenário. Não invente números, causas, municípios, previsões ou probabilidades. Não chame toda mudança de desmatamento. Indique denominadores de percentuais. Grupos analíticos sujeitos a validação; códigos 0 e 10 não reconhecidos. Não infira causalidade ou legalidade. Três anos não validam previsão. Retorne exclusivamente um objeto JSON com paragraphs (lista de quatro strings), assumptions (string explicando premissas do seu próprio cenário) e forecast (lista de objetos code, year, area_ha). Gere uma trajetória própria de IA para cada código reconhecido (exclua 0 e 10) para cada um dos três anos seguintes ao último observado. Use os dados históricos como base e os cenários matemáticos apenas como referência, não copie automaticamente. Preserve a soma das áreas reconhecidas do último ano em cada ano futuro, tolerância 0,1%, valores não negativos. Não invente evidência externa. Identifique sua trajetória como hipótese exploratória sem validação. A estrutura JSON é para a aplicação, não para o leitor."""
+        body={"model":model,"messages":[{"role":"system","content":system},{"role":"user","content":json.dumps(data,ensure_ascii=False)}],"temperature":0.2,"max_tokens":8192,"stream":False}
         if model==MODEL:
             body["chat_template_kwargs"]={"enable_thinking":False}
         req=Request(ENDPOINT,data=json.dumps(body).encode(),headers={"Authorization":"Bearer "+key,"Content-Type":"application/json"})
@@ -88,7 +122,8 @@ def generate(info,resolution):
         except (URLError,TimeoutError):raise RuntimeError("Falha de conexão com NVIDIA; nenhuma repetição automática.") from None
         choice=result["choices"][0];text=choice["message"].get("content")
         if choice.get("finish_reason")=="length" or not isinstance(text,str) or not text.strip():raise RuntimeError("Resposta vazia ou truncada; não armazenada")
-        saved={"fingerprint":digest,"model":model,"created_utc":datetime.now(timezone.utc).isoformat(),"prompt_version":VERSION,"text":text.strip(),"years":data["years"]}
+        text,forecast,assumptions=parse_output(text,data)
+        saved={"forecast":forecast,"assumptions":assumptions,"fingerprint":digest,"model":model,"created_utc":datetime.now(timezone.utc).isoformat(),"prompt_version":VERSION,"text":text.strip(),"years":data["years"]}
         tmp=target.with_suffix(".tmp");tmp.write_text(json.dumps(saved,ensure_ascii=False,indent=2),encoding="utf-8");tmp.replace(target)
         return {"status":"ready",**saved}
 
