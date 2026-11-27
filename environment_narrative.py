@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
 ROOT=Path(__file__).resolve().parent
-MODEL="deepseek-ai/deepseek-v4.1-flash"
+MODEL="nvidia/nemotron-3.5-lightning-30b-a3b"
 ENDPOINT="https://integrate.api.nvidia.com/v1/chat/completions"
 VERSION=1
 
@@ -79,6 +79,8 @@ def generate(info,resolution):
         model=os.environ.get("NVIDIA_MODEL",MODEL)
         system="""Interprete estatísticas ambientais para público geral em português brasileiro. Use exclusivamente o JSON fornecido. Produza quatro parágrafos curtos de texto puro: paisagem no ano recente; mudanças entre extremos; explicação dos cenários futuros calculados e suas hipóteses; limitações e como interpretar. Diferencie estoque, transição e cenário. Não invente números, causas, municípios, previsões ou probabilidades. Não chame toda mudança de desmatamento. Indique denominadores de percentuais. Grupos analíticos sujeitos a validação; códigos 0 e 10 não reconhecidos. Não infira causalidade ou legalidade. Três anos não validam previsão."""
         body={"model":model,"messages":[{"role":"system","content":system},{"role":"user","content":json.dumps(data,ensure_ascii=False)}],"temperature":0.2,"max_tokens":4096,"stream":False}
+        if model==MODEL:
+            body["chat_template_kwargs"]={"enable_thinking":False}
         req=Request(ENDPOINT,data=json.dumps(body).encode(),headers={"Authorization":"Bearer "+key,"Content-Type":"application/json"})
         try:
             with urlopen(req,timeout=180) as response:result=json.load(response)
