@@ -418,3 +418,32 @@ def recent_monitoring(resolution:int=5):
     obj=json.loads(path.read_text())
     if obj["grid_sha256"]!=sha(folder/"grid.parquet"):raise HTTPException(409,"Grade alterada; atualize o monitoramento")
     return obj
+
+@app.get("/api/explorer/meta")
+def explorer_meta(resolution:int=5):
+    from environment_explorer import metadata
+    return metadata(resolution)
+
+@app.get("/api/explorer/map")
+def explorer_map(resolution:int=5,year:int=2025,mode:str="dominant",code:int=1,from_code:int=1,to_code:int=3,municipality:str=""):
+    from environment_explorer import explore
+    g=explore(resolution,year,mode,code,from_code,to_code,municipality)
+    return Response(g.to_json(drop_id=True),media_type="application/geo+json")
+
+@app.get("/api/explorer/cell")
+def explorer_cell(resolution:int=5,cell_id:str=""):
+    from environment_explorer import profile
+    return profile(resolution,cell_id)
+
+@app.get("/api/explorer/export")
+def explorer_export(resolution:int=5,year:int=2025,mode:str="dominant",code:int=1,from_code:int=1,to_code:int=3,municipality:str=""):
+    from environment_explorer import explore
+    g=explore(resolution,year,mode,code,from_code,to_code,municipality).drop(columns="geometry")
+    g["mode"]=mode;g["year"]=year if mode!="change" else None
+    g["code"]=code if mode=="coverage" else None
+    g["from_code"]=from_code if mode=="change" else None
+    g["to_code"]=to_code if mode=="change" else None
+    if mode=="change":
+        from environment_explorer import inputs
+        g["start_year"],g["end_year"]=inputs(resolution)[2]["transition"]
+    return Response(g.to_csv(index=False),media_type="text/csv",headers={"Content-Disposition":"attachment; filename=mapbiomas-exploracao.csv"})
