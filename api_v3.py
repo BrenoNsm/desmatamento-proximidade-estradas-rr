@@ -408,3 +408,13 @@ def catalog(resolution:int=5):
 def landcover_narrative(resolution:int=5):
     from environment_narrative import read_analysis
     return read_analysis(landcover(resolution),resolution)
+
+@app.get("/api/monitoring")
+def recent_monitoring(resolution:int=5):
+    from landcover_v3 import sha
+    folder=ROOT/"data/v3"/str(resolution)
+    path=folder/"monitoring"/"monitoring.json"
+    if not path.exists():return {"available":False}
+    obj=json.loads(path.read_text())
+    if obj["grid_sha256"]!=sha(folder/"grid.parquet"):raise HTTPException(409,"Grade alterada; atualize o monitoramento")
+    return obj
