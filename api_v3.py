@@ -203,3 +203,32 @@ def territorial_models(resolution:int=5,start:int=2008,end:int=2024):
     d=d.merge(pd.read_parquet(target/"covariates.parquet"),on="cell_id",validate="many_to_one")
     try:return compare_territorial_models(d,resolution)
     except (ValueError,ArithmeticError,np.linalg.LinAlgError) as e:raise HTTPException(422,str(e)) from e
+
+
+@lru_cache(maxsize=2)
+def road_geojson(stamp, detail):
+    path=ROOT/"data/v2/roads.parquet"
+    roads=gpd.read_parquet(path).to_crs(4326)
+    roads=roads[roads.geom_type.isin(["LineString","MultiLineString"])].copy()
+    if "fclass" in roads.columns:
+        roads["road_class"]=roads.fclass.fillna("unknown").astype(str)
+    else:
+        roads["road_class"]="unknown"
+    major={"motorway","trunk","primary","secondary","motorway_link","trunk_link","primary_link","secondary_link"}
+    roads["major"]=roads.road_class.isin(major)
+    if detail=="major" and roads.road_class.ne("unknown").any():
+        roads=roads[roads.major].copy()
+    cols=["road_class","major","geometry"]
+    roads=roads[cols].copy()
+    # Simplify only the display copy. The analysis continues to use original roads.
+    roads.geometry=roads.geometry.simplify(.0001 if detail=="major" else .000025,preserve_topology=True)
+    return roads.to_json(drop_id=True)
+
+@app.get("/api/roads")
+def roads(detail:str="all"):
+    if detail not in ("major","all"):
+        raise HTTPException(422,"Detalhe deve ser major ou all")
+    path=ROOT/"data/v2/roads.parquet"
+    if not path.exists():
+        raise HTTPException(404,"Malha viária processada não encontrada em data/v2/roads.parquet")
+    return Response(road_geojson(path.stat().st_mtime_ns,detail),media_type="application/geo+json",headers={"Cache-Control":"no-cache"})
