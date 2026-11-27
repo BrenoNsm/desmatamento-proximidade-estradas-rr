@@ -323,7 +323,7 @@ def landcover_map(resolution:int=5,year:int=2024,code:int=1):
     manifest=info["manifest"]
     if year not in manifest["years"] or str(code) not in manifest["groups"]:
         raise HTTPException(422,"Ano ou classe não processados")
-    g,_,_=dataset(resolution)
+    g=landcover_grid(resolution)
     g=g[["cell_id","territory_ha","distance_km","road_density","geometry"]].copy()
     c=pd.read_parquet(ROOT/"data/v3"/str(resolution)/"landcover/coverage.parquet")
     c=c[c.year==year]
@@ -345,7 +345,7 @@ def landcover_changes_map(resolution:int=5,from_code:int=1,to_code:int=3):
     if not info["available"]:raise HTTPException(404,info["message"])
     if from_code in (0,10) or to_code in (0,10) or from_code==to_code or any(str(k) not in info["manifest"]["groups"] for k in (from_code,to_code)):
         raise HTTPException(422,"Selecione duas classes reconhecidas e diferentes")
-    g,_,_=dataset(resolution)
+    g=landcover_grid(resolution)
     g=g[["cell_id","territory_ha","distance_km","road_density","geometry"]].copy()
     t=pd.read_parquet(ROOT/"data/v3"/str(resolution)/"landcover/transitions.parquet")
     valid=t[~t.from_code.isin([0,10])&~t.to_code.isin([0,10])]
@@ -357,3 +357,49 @@ def landcover_changes_map(resolution:int=5,from_code:int=1,to_code:int=3):
     g["cover_pct"]=100*g.cover_ha/g.sampled_ha.where(g.sampled_ha>0)
     g["missing_pct"]=100*(1-g.sampled_ha.fillna(0)/g.cell_id.map(sampled).where(lambda x:x>0))
     return Response(g.to_json(drop_id=True),media_type="application/geo+json")
+
+def landcover_grid(resolution):
+    path=ROOT/"data/v3"/str(resolution)/"grid.parquet"
+    if not path.exists():raise HTTPException(404,"Grade espacial indisponível")
+    return gpd.read_parquet(path).to_crs(4326)
+
+@app.get("/api/landcover/research")
+def landcover_research(resolution:int=5,year:int=2025,code:int=1,mode:str="coverage",from_code:int=1,to_code:int=3,spatial_test:bool=False,permutations:int=Query(199,ge=99,le=999)):
+    info=landcover(resolution)
+    if not info["available"]:raise HTTPException(404,info["message"])
+    m=info["manifest"]
+    if mode=="coverage":
+        response=landcover_map(resolution,year,code)
+        period=str(year)
+    elif mode=="change":
+        response=landcover_changes_map(resolution,from_code,to_code)
+        period="–".join(map(str,m["transition"]))
+    else:raise HTTPException(422,"Indicador inválido")
+    features=json.loads(response.body)
+    frame=pd.DataFrame([f["properties"] for f in features["features"]])
+    g=landcover_grid(resolution)
+    frame=frame.merge(g[["cell_id","i","j"]],on="cell_id",validate="one_to_one")
+    # Require at least 95% recognized area to avoid misleading comparisons.
+    good=frame.cover_pct.notna()&frame.missing_pct.le(5)&frame.sampled_ha.gt(0)&np.isfinite(frame.distance_km)
+    v=frame.loc[good].reset_index(drop=True).copy()
+    v["band"]=pd.cut(v.distance_km,[-np.inf,5,10,20,np.inf],labels=["0–5","5–10","10–20",">20"],right=False)
+    bands=v.groupby("band",observed=False).agg(area_ha=("cover_ha","sum"),sampled_ha=("sampled_ha","sum"),cells=("cell_id","size")).reset_index()
+    bands["pct"]=100*bands.area_ha/bands.sampled_ha.replace(0,np.nan)
+    result={"period":period,"grid":features,"bands":json.loads(bands.to_json(orient="records")),
+            "association":association(v.distance_km,v.cover_pct),"included":len(v),"excluded":len(frame)-len(v),"moran":None}
+    if spatial_test:
+        r=moran(v.cover_pct,v.i,v.j,permutations=permutations)
+        for row in r["local"]:row["cell_id"]=v.iloc[row.pop("index")].cell_id
+        result["moran"]=r
+    return result
+
+@app.get("/api/catalog")
+def catalog(resolution:int=5):
+    g=landcover_grid(resolution)
+    lc=landcover(resolution)
+    folder=ROOT/"data/v3"/str(resolution)
+    prodes=(folder/"annual.parquet").exists() and (folder/"manifest.json").exists()
+    years=json.loads((folder/"manifest.json").read_text()).get("years",[]) if prodes else []
+    return {"resolutions":[r for r in (2,5,10,20) if (ROOT/"data/v3"/str(r)/"grid.parquet").exists()],
+            "mapbiomas_years":lc["manifest"]["years"] if lc["available"] else [],"prodes_years":years,
+            "cells":len(g),"resolution":resolution}
