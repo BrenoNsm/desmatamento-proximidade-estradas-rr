@@ -447,3 +447,16 @@ def explorer_export(resolution:int=5,year:int=2025,mode:str="dominant",code:int=
         from environment_explorer import inputs
         g["start_year"],g["end_year"]=inputs(resolution)[2]["transition"]
     return Response(g.to_csv(index=False),media_type="text/csv",headers={"Content-Disposition":"attachment; filename=mapbiomas-exploracao.csv"})
+
+@app.get("/api/explorer/municipal")
+def explorer_municipal():
+    from municipal_landcover import TARGET,BOUNDARY,sha
+    from environment_explorer import municipalities
+    p=TARGET/"manifest.json"
+    if not p.exists():return {"available":False}
+    m=json.loads(p.read_text())
+    if m["boundary_sha256"]!=sha(BOUNDARY):raise HTTPException(409,"Limites municipais alterados; atualize a base municipal")
+    c=pd.read_parquet(TARGET/"coverage.parquet")
+    t=pd.read_parquet(TARGET/"transitions.parquet")
+    mun=municipalities()
+    return {"available":True,"manifest":m,"municipalities":json.loads(mun.drop(columns="geometry").to_json(orient="records")),"annual":json.loads(c.to_json(orient="records")),"transitions":json.loads(t.to_json(orient="records"))}
