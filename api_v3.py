@@ -315,3 +315,45 @@ def landcover_export(resolution:int=5,kind:str="coverage"):
     if not landcover(resolution)["available"]:raise HTTPException(404,"MapBiomas não processado")
     p=ROOT/"data/v3"/str(resolution)/"landcover"/(kind+".parquet")
     return Response(pd.read_parquet(p).to_csv(index=False),media_type="text/csv",headers={"Content-Disposition":f"attachment; filename=mapbiomas-{kind}.csv"})
+
+@app.get("/api/landcover/map")
+def landcover_map(resolution:int=5,year:int=2024,code:int=1):
+    info=landcover(resolution)
+    if not info["available"]:raise HTTPException(404,info["message"])
+    manifest=info["manifest"]
+    if year not in manifest["years"] or str(code) not in manifest["groups"]:
+        raise HTTPException(422,"Ano ou classe não processados")
+    g,_,_=dataset(resolution)
+    g=g[["cell_id","territory_ha","distance_km","road_density","geometry"]].copy()
+    c=pd.read_parquet(ROOT/"data/v3"/str(resolution)/"landcover/coverage.parquet")
+    c=c[c.year==year]
+    total=c.groupby("cell_id").area_ha.sum()
+    chosen=c[c.code==code].groupby("cell_id").area_ha.sum()
+    missing=c[c.code.isin([0,10])].groupby("cell_id").area_ha.sum()
+    g["sampled_ha"]=g.cell_id.map(total)
+    g["cover_ha"]=g.cell_id.map(chosen).fillna(0).where(g.sampled_ha>0)
+    g["cover_pct"]=100*g.cover_ha/g.sampled_ha.where(g.sampled_ha>0)
+    g["missing_pct"]=100*g.cell_id.map(missing).fillna(0)/g.sampled_ha.where(g.sampled_ha>0)
+    # For recognized classes, do not depict an entirely unclassified cell as zero coverage.
+    if code not in (0,10):
+        g.loc[g.missing_pct>=99.999999,["cover_pct","cover_ha"]]=np.nan
+    return Response(g.to_json(drop_id=True),media_type="application/geo+json")
+
+@app.get("/api/landcover/changes-map")
+def landcover_changes_map(resolution:int=5,from_code:int=1,to_code:int=3):
+    info=landcover(resolution)
+    if not info["available"]:raise HTTPException(404,info["message"])
+    if from_code in (0,10) or to_code in (0,10) or from_code==to_code or any(str(k) not in info["manifest"]["groups"] for k in (from_code,to_code)):
+        raise HTTPException(422,"Selecione duas classes reconhecidas e diferentes")
+    g,_,_=dataset(resolution)
+    g=g[["cell_id","territory_ha","distance_km","road_density","geometry"]].copy()
+    t=pd.read_parquet(ROOT/"data/v3"/str(resolution)/"landcover/transitions.parquet")
+    valid=t[~t.from_code.isin([0,10])&~t.to_code.isin([0,10])]
+    total=valid.groupby("cell_id").area_ha.sum()
+    chosen=valid[(valid.from_code==from_code)&(valid.to_code==to_code)].groupby("cell_id").area_ha.sum()
+    sampled=t.groupby("cell_id").area_ha.sum()
+    g["sampled_ha"]=g.cell_id.map(total)
+    g["cover_ha"]=g.cell_id.map(chosen).fillna(0).where(g.sampled_ha>0)
+    g["cover_pct"]=100*g.cover_ha/g.sampled_ha.where(g.sampled_ha>0)
+    g["missing_pct"]=100*(1-g.sampled_ha.fillna(0)/g.cell_id.map(sampled).where(lambda x:x>0))
+    return Response(g.to_json(drop_id=True),media_type="application/geo+json")
